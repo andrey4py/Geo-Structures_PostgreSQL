@@ -1,0 +1,229 @@
+CREATE EXTENSION IF NOT EXISTS postgis;
+SELECT PostGIS_Version();
+
+CREATE TABLE venues (
+    id          SERIAL PRIMARY KEY,
+    name        TEXT NOT NULL,
+    city        TEXT NOT NULL,
+    address     TEXT NOT NULL,
+    location    GEOMETRY(Point, 4326)
+);
+
+
+--генерим данные
+INSERT INTO venues (name,city,address,location)
+SELECT 	
+    'Театр №' || i,
+    'Москва',
+    'ул. ' || (ARRAY['Пушкина','Ленина','Гагарина','Ломоносова','Кирова','Пионеров'])[1 + (random()*5)::int] || ' ' || (i%100),
+    ST_SetSRID(
+        ST_MakePoint(
+            37.6156 + random() * 0.5,    
+            55.7522 + random() * 0.5     
+        ),
+        4326
+    )
+FROM generate_series(1, 10000) AS s(i);
+
+SELECT * FROM venues LIMIT 100;
+TRUNCATE TABLE venues RESTART IDENTITY;
+
+--без индекса
+
+--поиск в радиусе
+EXPLAIN ANALYZE
+SELECT
+    id,
+    name,
+    city,
+    address,
+    ST_Distance(location, ST_SetSRID(ST_MakePoint(37.6173, 55.7558), 4326)) AS distance
+FROM venues
+WHERE ST_Distance(location, ST_SetSRID(ST_MakePoint(37.6173, 55.7558), 4326)) < 0.1
+order by  distance
+
+--knn
+EXPLAIN ANALYZE
+SELECT
+    id,
+    name,
+    city,
+    address,
+    ST_Distance(location, ST_SetSRID(ST_MakePoint(37.6173, 55.7558), 4326)) AS distance
+FROM venues
+ORDER BY location <-> ST_SetSRID(ST_MakePoint(37.6173, 55.7558), 4326)
+LIMIT 10;
+
+DROP INDEX IF EXISTS idx_venues_location;
+CREATE INDEX idx_venues_location ON venues USING GIST (location);
+
+--индекс гист на геометрию
+--поиск в радиусе
+EXPLAIN ANALYZE
+SELECT
+    id,
+    name,
+    city,
+    address,
+    ST_Distance(location, ST_SetSRID(ST_MakePoint(37.6173, 55.7558), 4326)) AS distance
+FROM venues
+WHERE ST_DWithin(
+    location,
+    ST_SetSRID(ST_MakePoint(37.6173, 55.7558), 4326),
+    0.1
+)
+ORDER BY distance
+
+--поиск ближайших 10
+EXPLAIN ANALYZE
+SELECT
+    id,
+    name,
+    city,
+    address,
+    ST_Distance(location, ST_SetSRID(ST_MakePoint(37.6173, 55.7558), 4326)) AS distance
+FROM venues
+ORDER BY location <-> ST_SetSRID(ST_MakePoint(37.6173, 55.7558), 4326)
+LIMIT 10;
+
+--каст к географии
+EXPLAIN ANALYZE
+SELECT
+    id,
+    name,
+    city,
+    address,
+    ST_Distance(
+        location::geography,
+        ST_MakePoint(37.6173, 55.7558)::geography
+    ) AS distance_meters
+FROM venues
+WHERE ST_DWithin(
+    location::geography,
+    ST_MakePoint(37.6173, 55.7558)::geography,
+    10000
+)
+ORDER BY distance_meters;
+
+--индекс гист на географию
+ALTER TABLE venues ALTER COLUMN location TYPE GEOGRAPHY(Point, 4326);
+DROP INDEX IF EXISTS idx_venues_location;
+CREATE INDEX idx_venues_location ON venues USING GIST (location);
+
+--1 запрос
+EXPLAIN ANALYZE
+SELECT
+    id,
+    name,
+    city,
+    address,
+    ST_Distance(location, ST_MakePoint(37.6173, 55.7558)::geography) AS distance_meters
+FROM venues
+WHERE ST_DWithin(
+    location,
+    ST_MakePoint(37.6173, 55.7558)::geography,
+    10000
+)
+ORDER BY distance_meters;
+
+--2 запрос
+EXPLAIN ANALYZE
+SELECT
+    id,
+    name,
+    city,
+    address,
+    ST_Distance(location, ST_MakePoint(37.6173, 55.7558)::geography) AS distance
+FROM venues
+ORDER BY location <-> ST_MakePoint(37.6173, 55.7558)::geography
+LIMIT 10;
+
+--индекс sp-gist
+DROP INDEX IF EXISTS idx_venues_location;
+DROP INDEX IF EXISTS idx_venues_location_spgist;
+ALTER TABLE venues ALTER COLUMN location TYPE GEOMETRY(Point, 4326) USING location::geometry(Point,4326);
+CREATE INDEX idx_venues_location_spgist ON venues USING SPGIST (location);
+
+--геометрия
+--1 запрос
+EXPLAIN ANALYZE
+SELECT id, name, city, address,
+       ST_Distance(location, ST_SetSRID(ST_MakePoint(37.6173, 55.7558), 4326)) AS distance
+FROM venues
+WHERE ST_DWithin(
+    location,
+    ST_SetSRID(ST_MakePoint(37.6173, 55.7558), 4326),
+    0.1
+)
+ORDER BY distance;
+
+-- 2 запрос knn
+EXPLAIN ANALYZE
+SELECT
+    id,
+    name,
+    city,
+    address,
+    ST_Distance(location, ST_SetSRID(ST_MakePoint(37.6173, 55.7558), 4326)) AS distance
+FROM venues
+ORDER BY location <-> ST_SetSRID(ST_MakePoint(37.6173, 55.7558), 4326)
+LIMIT 10;
+
+--каст к географии
+EXPLAIN ANALYZE
+SELECT id, name, city, address,
+       ST_Distance(location::geography, ST_MakePoint(37.6173, 55.7558)::geography) AS distance_meters
+FROM venues
+WHERE ST_DWithin(
+    location::geography,
+    ST_MakePoint(37.6173, 55.7558)::geography,
+    10000
+)
+ORDER BY distance_meters;
+
+--география
+ALTER TABLE venues ALTER COLUMN location TYPE GEOGRAPHY(Point, 4326);
+DROP INDEX IF EXISTS idx_venues_location_spgist;
+CREATE INDEX idx_venues_location_spgist ON venues USING SPGIST (location);
+
+EXPLAIN ANALYZE
+SELECT id, name, city, address,
+       ST_Distance(location, ST_MakePoint(37.6173, 55.7558)::geography) AS distance_meters
+FROM venues
+WHERE ST_DWithin(
+    location,
+    ST_MakePoint(37.6173, 55.7558)::geography,
+    10000
+)
+ORDER BY distance_meters;
+
+--BRIN индекс
+DROP INDEX IF EXISTS idx_venues_location_spgist;
+DROP INDEX IF EXISTS idx_venues_location_brin;
+ALTER TABLE venues ALTER COLUMN location TYPE GEOMETRY(Point, 4326) USING location::geometry(Point,4326);
+CREATE INDEX idx_venues_location_brin ON venues USING BRIN (location);
+
+EXPLAIN ANALYZE
+SELECT id, name, city, address,
+       ST_Distance(location, ST_SetSRID(ST_MakePoint(37.6173, 55.7558), 4326)) AS distance
+FROM venues
+WHERE ST_DWithin(
+    location,
+    ST_SetSRID(ST_MakePoint(37.6173, 55.7558), 4326),
+    0.1
+)
+ORDER BY distance;
+
+EXPLAIN ANALYZE
+SELECT
+    id,
+    name,
+    city,
+    address,
+    ST_Distance(location, ST_SetSRID(ST_MakePoint(37.6173, 55.7558), 4326)) AS distance
+FROM venues
+ORDER BY location <-> ST_SetSRID(ST_MakePoint(37.6173, 55.7558), 4326)
+LIMIT 10;
+
+
+
