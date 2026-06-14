@@ -23,7 +23,7 @@ The ticket booking service required an efficient mechanism for finding venues by
 - Impact of data type choices on index usage and query performance
 
 ### Key Findings
-Empirical testing showed that index type selection and data type consistency between the column definition and query conditions are both critical for achieving efficient spatial query execution. The research identified which combinations of index types and data types lead to index usage and which fall back to full table scans, with measurable differences in query performance.
+The study showed that out of the three types of indexes tested, only GiST (R-Tree) supports both geosearch scenarios — radius search and KNN nearest neighbor search. SP-GiST (quadtree) is only suitable for radius search and doesn’t support KNN, while BRIN turned out to be completely useless for geospatial queries. The optimal setup for geosearch is using a GEOGRAPHY type column with a GiST index — it allows proper use of the index for both scenarios and returns distances in meters without any extra conversion.
 
 ### Structure
 - Report .pdf
@@ -52,7 +52,7 @@ Empirical testing showed that index type selection and data type consistency bet
 - Влияние выбора типа данных на использование индекса и производительность запросов
 
 ### Основные выводы
-Эмпирическое тестирование показало, что выбор типа индекса и согласованность типов данных между определением столбца и условиями запроса критически важны для эффективного выполнения пространственных запросов. В ходе исследования определены комбинации типов индексов и типов данных, при которых индекс используется, а при которых планировщик переходит на полный перебор таблицы — с измеримой разницей в производительности.
+Исследование показало, что из трёх протестированных типов индексов только GiST (R-Tree) поддерживает оба сценария геопоиска — поиск в радиусе и KNN-поиск ближайших объектов. SP-GiST (квадродерево) применим только для поиска в радиусе и не поддерживает KNN, BRIN оказался полностью непригоден для геопространственных запросов. Оптимальной конфигурацией для задачи геопоиска является сочетание столбца типа GEOGRAPHY с индексом GiST — оно обеспечивает корректное использование индекса для обоих сценариев и возвращает расстояния в метрах без дополнительной конвертации.
 
 ### Структура
 - Отчет .pdf
